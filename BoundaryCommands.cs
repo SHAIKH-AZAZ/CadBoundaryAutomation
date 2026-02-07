@@ -98,7 +98,7 @@ namespace CadBoundaryAutomation
             var dlg = new BoundarySettingsForm(
                 defaultSpacingH: 100.0,
                 defaultSpacingV: 100.0,
-                defaultOrientation: BarsOrientation.Horizontal
+                defaultOrientation: BarsOrientation.Vertical
             );
 
             WinForms.DialogResult dr = AcAp.ShowModalDialog(dlg);
@@ -460,7 +460,7 @@ namespace CadBoundaryAutomation
                         store.Add(new BarJson
                         {
                             Index = barIndex,
-                            Orientation = "H",
+                            Orientation = "Horizontal",
                             Length = len,
                             Handle = bar.Handle.ToString(),
                             Start = ToPointJson(bar.StartPoint),
@@ -525,7 +525,7 @@ namespace CadBoundaryAutomation
                         store.Add(new BarJson
                         {
                             Index = barIndex,
-                            Orientation = "V",
+                            Orientation = "Vertical",
                             Length = len,
                             Handle = bar.Handle.ToString(),
                             Start = ToPointJson(bar.StartPoint),
