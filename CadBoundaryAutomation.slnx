@@ -1,3 +1,9 @@
 <Solution>
-  <Project Path="CadBoundaryAutomation.csproj" Id="093d7e6d-42b9-4e9f-95c4-0ce31092c290" />
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="CadBoundaryAutomation.csproj" Id="093d7e6d-42b9-4e9f-95c4-0ce31092c290">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
 </Solution>

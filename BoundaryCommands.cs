@@ -19,42 +19,104 @@ namespace AutoCadBoundaryProcessor
             Editor ed = doc.Editor;
             Database db = doc.Database;
 
-            PromptPointResult ppr = ed.GetPoint("\nPick a point inside the shape: ");
-            if (ppr.Status != PromptStatus.OK) return;
-            Point3d anchor = ppr.Value;
+            ed.WriteMessage(
+                "\nDraw a CLOSED boundary using PLINE (type C to close, or end at start point), then press Enter..."
+            );
+
+            ObjectId createdBoundaryId = ObjectId.Null;
+
+            // Capture the first polyline created during the PLINE command
+            ObjectEventHandler appendedHandler = (sender, e) =>
+            {
+                if (createdBoundaryId != ObjectId.Null) return;
+
+                if (e.DBObject is Entity ent && ent.OwnerId == db.CurrentSpaceId)
+                {
+                    if (ent is Polyline || ent is Polyline2d || ent is Polyline3d)
+                    {
+                        createdBoundaryId = ent.ObjectId;
+                    }
+                }
+            };
+
+            db.ObjectAppended += appendedHandler;
+
+            try
+            {
+                // Run PLINE interactively (returns when user finishes)
+                ed.Command("_.PLINE");
+            }
+            catch (Autodesk.AutoCAD.Runtime.Exception ex)
+            {
+                if (ex.ErrorStatus == ErrorStatus.UserBreak)
+                    return;
+
+                ed.WriteMessage($"\n❌ Error while running PLINE: {ex.Message}");
+                return;
+            }
+            finally
+            {
+                db.ObjectAppended -= appendedHandler;
+            }
+
+            if (createdBoundaryId == ObjectId.Null)
+            {
+                ed.WriteMessage("\n❌ No polyline created. Command cancelled.");
+                return;
+            }
 
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
-                DBObjectCollection boundaryCurves = ed.TraceBoundary(anchor, false);
-                if (boundaryCurves.Count == 0)
+                // Open for write because we may set Closed=true
+                Entity ent = (Entity)tr.GetObject(createdBoundaryId, OpenMode.ForWrite);
+
+                // Ensure we end up with a closed Curve
+                Curve boundaryCurve = null;
+
+                // Auto-close only for LWPolyline (most common PLINE result)
+                if (ent is Polyline pl)
                 {
-                    ed.WriteMessage("\n❌ No closed boundary found.");
-                    return;
+                    if (!pl.Closed)
+                    {
+                        // Tolerance in drawing units (mm if drawing is mm)
+                        double closeTol = 0.5;
+
+                        if (pl.StartPoint.DistanceTo(pl.EndPoint) <= closeTol)
+                        {
+                            pl.Closed = true; // auto-close
+                            ed.WriteMessage($"\n✅ Auto-closed polyline (tol={closeTol}).");
+                        }
+                    }
+
+                    if (!pl.Closed)
+                    {
+                        ed.WriteMessage(
+                            "\n❌ Boundary must be closed (use C in PLINE or end at start point)."
+                        );
+                        return;
+                    }
+
+                    boundaryCurve = pl;
                 }
+                else
+                {
+                    // For other polyline types / curves
+                    boundaryCurve = ent as Curve;
+
+                    if (boundaryCurve == null || !boundaryCurve.Closed)
+                    {
+                        ed.WriteMessage("\n❌ Boundary must be a closed polyline/curve.");
+                        return;
+                    }
+                }
+
+                ed.WriteMessage($"\n✅ Boundary Handle: {ent.Handle}");
 
                 BlockTableRecord btr =
                     (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
 
-                // Compute extents
-                Extents3d ext = new Extents3d();
-                bool first = true;
-
-                foreach (DBObject obj in boundaryCurves)
-                {
-                    if (obj is Entity ent)
-                    {
-                        if (first)
-                        {
-                            ext = ent.GeometricExtents;
-                            first = false;
-                        }
-                        else
-                        {
-                            ext.AddExtents(ent.GeometricExtents);
-                        }
-                    }
-                }
-
+                // Get boundary extents
+                Extents3d ext = boundaryCurve.GeometricExtents;
 
                 double minX = ext.MinPoint.X;
                 double maxX = ext.MaxPoint.X;
@@ -64,52 +126,59 @@ namespace AutoCadBoundaryProcessor
                 const double spacing = 100.0; // 100 mm C/C
 
                 int barIndex = 1;
-                double totalLength = 0;
+                double totalLength = 0.0;
 
-                // 🔹 Generate horizontal lines
+                // Add extra margin so test line surely crosses boundary
+                double margin = Math.Max(1000.0, (maxX - minX) + (maxY - minY));
+
+                // Scanline fill (horizontal bars)
                 for (double y = minY; y <= maxY; y += spacing)
                 {
-                    Line testLine = new Line(
-                        new Point3d(minX - 1000, y, 0),
-                        new Point3d(maxX + 1000, y, 0)
-                    );
-
-                    List<Point3d> intersections = new List<Point3d>();
-
-                    foreach (Entity boundary in boundaryCurves)
+                    using (Line testLine = new Line(
+                        new Point3d(minX - margin, y, 0),
+                        new Point3d(maxX + margin, y, 0)
+                    ))
                     {
-                        if (boundary is Curve bc)
+                        Point3dCollection pts = new Point3dCollection();
+
+                        testLine.IntersectWith(
+                            boundaryCurve,
+                            Intersect.OnBothOperands,
+                            pts,
+                            IntPtr.Zero,
+                            IntPtr.Zero
+                        );
+
+                        if (pts.Count < 2)
+                            continue;
+
+                        List<Point3d> intersections = new List<Point3d>();
+                        foreach (Point3d p in pts)
+                            intersections.Add(p);
+
+                        // Sort intersections from left to right
+                        intersections.Sort((a, b) => a.X.CompareTo(b.X));
+
+                        // Pair points (0-1, 2-3, ...)
+                        for (int i = 0; i < intersections.Count - 1; i += 2)
                         {
-                            Point3dCollection pts = new Point3dCollection();
-                            testLine.IntersectWith(
-                                bc,
-                                Intersect.OnBothOperands,
-                                pts,
-                                IntPtr.Zero,
-                                IntPtr.Zero
-                            );
+                            Line bar = new Line(intersections[i], intersections[i + 1]);
 
-                            foreach (Point3d p in pts)
-                                intersections.Add(p);
+                            double len = bar.Length;
+                            if (len <= 0.0001)
+                            {
+                                bar.Dispose();
+                                continue;
+                            }
+
+                            totalLength += len;
+
+                            btr.AppendEntity(bar);
+                            tr.AddNewlyCreatedDBObject(bar, true);
+
+                            ed.WriteMessage($"\nBar {barIndex}: {len:F2} mm");
+                            barIndex++;
                         }
-                    }
-
-                    if (intersections.Count < 2) continue;
-
-                    intersections.Sort((a, b) => a.X.CompareTo(b.X));
-
-                    for (int i = 0; i < intersections.Count - 1; i += 2)
-                    {
-                        Line bar = new Line(intersections[i], intersections[i + 1]);
-                        double len = bar.Length;
-
-                        totalLength += len;
-                        ed.WriteMessage($"\nBar {barIndex}: {len:F2} mm");
-
-                        btr.AppendEntity(bar);
-                        tr.AddNewlyCreatedDBObject(bar, true);
-
-                        barIndex++;
                     }
                 }
 
