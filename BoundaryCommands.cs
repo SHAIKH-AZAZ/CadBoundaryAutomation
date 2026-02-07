@@ -7,7 +7,7 @@ using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
 
 [assembly: CommandClass(typeof(AutoCadBoundaryProcessor.BoundaryCommands))]
-
+// this is created by azaz
 namespace AutoCadBoundaryProcessor
 {
     public class BoundaryCommands
