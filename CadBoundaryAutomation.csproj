@@ -76,11 +76,19 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="BoundaryCommands.cs" />
+    <Compile Include="Commands\BoundaryCommands.cs" />
+    <Compile Include="Models\BarsJsonModels.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Service\BarGenerator.cs" />
+    <Compile Include="Service\JsonExporter.cs" />
+    <Compile Include="Service\PlineRunner.cs" />
+    <Compile Include="UI\BoundarySettingsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
